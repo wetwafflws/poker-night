@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Modal } from '../ui/Modal';
 import { Label } from '../ui/Label';
 import { Button } from '../ui/Button';
@@ -21,6 +22,8 @@ export function HandResultModal({
   onClose,
   t 
 }) {
+  const [manualSplitSelect, setManualSplitSelect] = useState([]);
+  
   return (
     <Modal title="Hand Results" onClose={onClose} t={t} wide>
       {/* ── SIDE POTS: award each one; mark awarded, never remove ── */}
@@ -160,12 +163,39 @@ export function HandResultModal({
             <div style={{marginTop:14,borderTop:`1px solid ${t.border}`,paddingTop:14}}>
               <Label t={t}>Manually award pot to:</Label>
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-                {players.filter(p=>!p.folded).map(p=>(
-                  <Button key={p.id} onClick={()=>!potAwarded&&onAwardPot(p.id)}
-                    bg={potAwarded?t.disabledBg:t.accent} color={potAwarded?t.disabledText:"#fff"}
-                    disabled={potAwarded} px={14} py={8} fz={14}>{p.name}</Button>
-                ))}
+                {players.filter(p=>!p.folded).map(p=>{
+                  const isSelected = manualSplitSelect.includes(p.id);
+                  return (
+                    <Button key={p.id} 
+                      onClick={()=>!potAwarded&&setManualSplitSelect(
+                        isSelected 
+                          ? manualSplitSelect.filter(id=>id!==p.id)
+                          : [...manualSplitSelect, p.id]
+                      )}
+                      bg={potAwarded?t.disabledBg:isSelected?t.green:t.accent} 
+                      color={potAwarded?t.disabledText:"#fff"}
+                      disabled={potAwarded} px={14} py={8} fz={14}>
+                      {isSelected?"✓ ":""}{p.name}
+                    </Button>
+                  );
+                })}
               </div>
+              {!potAwarded&&manualSplitSelect.length>0&&(
+                <Button onClick={()=>{
+                  const selectedPlayers = players.filter(p=>manualSplitSelect.includes(p.id));
+                  if(selectedPlayers.length===1){
+                    onAwardPot(selectedPlayers[0].id);
+                  } else {
+                    onSplitPot(selectedPlayers);
+                  }
+                  setManualSplitSelect([]);
+                }}
+                  bg={manualSplitSelect.length>1?t.yellow:t.green} 
+                  style={{width:"100%",padding:"12px",fontSize:15,marginBottom:12}}>
+                  {manualSplitSelect.length>1?`🤝 Split ${chip(totalPotDisplay)} `:`Award ${chip(totalPotDisplay)} `}
+                  {`to ${players.filter(p=>manualSplitSelect.includes(p.id)).map(p=>p.name).join(" & ")}`}
+                </Button>
+              )}
             </div>
 
             {potAwarded&&onStartNextHand&&(
