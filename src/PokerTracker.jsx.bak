@@ -1,0 +1,761 @@
+import { useState, useEffect, useRef } from "react";
+
+// ── Card rendering ──────────────────────────────────────────────────────────
+const SUITS = ["S", "H", "D", "C"];
+const RANKS = ["2","3","4","5","6","7","8","9","T","J","Q","K","A"];
+const SUIT_SYMBOLS = { S: "♠", H: "♥", D: "♦", C: "♣" };
+const SUIT_COLORS   = { S: "#1e293b", H: "#dc2626", D: "#dc2626", C: "#1e293b" };
+
+function CardFace({ rank, suit, small }) {
+  const sym = SUIT_SYMBOLS[suit];
+  const col = SUIT_COLORS[suit];
+  const sz  = small ? { width: 36, height: 50, font: 11, symFont: 14 }
+                    : { width: 56, height: 78, font: 15, symFont: 22 };
+  return (
+    <div style={{
+      width: sz.width, height: sz.height,
+      background: "linear-gradient(145deg,#fff 0%,#f0f0f0 100%)",
+      borderRadius: 6, border: "1px solid #ccc",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+      userSelect: "none", flexShrink: 0, cursor: "default"
+    }}>
+      <span style={{ fontSize: sz.font, fontWeight: 700, color: col, lineHeight:1, fontFamily:"'Playfair Display',serif" }}>{rank}</span>
+      <span style={{ fontSize: sz.symFont, color: col, lineHeight:1 }}>{sym}</span>
+    </div>
+  );
+}
+
+function CardBack({ small }) {
+  const sz = small ? { width: 36, height: 50 } : { width: 56, height: 78 };
+  return (
+    <div style={{
+      width: sz.width, height: sz.height,
+      background: "repeating-linear-gradient(45deg,#1e3a5f 0,#1e3a5f 4px,#16304f 4px,#16304f 8px)",
+      borderRadius: 6, border: "2px solid #4a90d9",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.5)", flexShrink: 0
+    }} />
+  );
+}
+
+// ── Card Picker Modal ──────────────────────────────────────────────────────
+function CardPicker({ onSelect, onClose, usedCards = [], maxCards = 1, currentCount = 0 }) {
+  const remaining = maxCards - currentCount;
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center" }}
+         onClick={onClose}>
+      <div style={{ background:"#1a2a1a", border:"1px solid #2d5a2d", borderRadius:12, padding:20, maxWidth:480, width:"90%", maxHeight:"85vh", overflowY:"auto" }}
+           onClick={e => e.stopPropagation()}>
+        <div style={{ color:"#a3d977", fontFamily:"'Playfair Display',serif", fontSize:18, marginBottom:4, textAlign:"center" }}>Select Card</div>
+        {maxCards > 1 && <div style={{ color:"#64748b", fontSize:12, textAlign:"center", marginBottom:12 }}>Pick {remaining} more card{remaining !== 1 ? "s" : ""}</div>}
+        {SUITS.map(suit => (
+          <div key={suit} style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+            {RANKS.map(rank => {
+              const cardId = rank + suit;
+              const used = usedCards.includes(cardId);
+              return (
+                <div key={cardId} style={{ opacity: used ? 0.25 : 1, cursor: used ? "not-allowed" : "pointer", transition:"transform 0.1s" }}
+                     onClick={() => !used && onSelect(rank, suit)}>
+                  <CardFace rank={rank} suit={suit} small />
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        <button onClick={onClose} style={btnStyle("#555","#888")}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Hand Evaluator ─────────────────────────────────────────────────────────
+function rankValue(r) { return ["2","3","4","5","6","7","8","9","T","J","Q","K","A"].indexOf(r); }
+function evaluateHand(cards) {
+  // cards: array of {rank, suit} — best 5 from up to 7
+  if (cards.length < 2) return { score: 0, name: "?" };
+  const combos = cards.length <= 5 ? [cards] : getCombinations(cards, 5);
+  let best = null;
+  for (const combo of combos) {
+    const s = score5(combo);
+    if (!best || s.score > best.score) best = s;
+  }
+  return best;
+}
+function getCombinations(arr, k) {
+  if (k === 0) return [[]];
+  if (arr.length === k) return [arr];
+  const [first, ...rest] = arr;
+  return [...getCombinations(rest, k-1).map(c => [first,...c]), ...getCombinations(rest, k)];
+}
+function score5(cards) {
+  const ranks = cards.map(c => rankValue(c.rank)).sort((a,b)=>b-a);
+  const suits = cards.map(c => c.suit);
+  const flush = suits.every(s => s === suits[0]);
+  const straight = ranks[0]-ranks[4]===4 && new Set(ranks).size===5
+    || ranks.join()=="12,3,2,1,0"; // A-2-3-4-5
+  const counts = {};
+  ranks.forEach(r => counts[r] = (counts[r]||0)+1);
+  const grouped = Object.values(counts).sort((a,b)=>b-a);
+  const topRanks = Object.entries(counts).sort((a,b)=>b[1]-a[1]||b[0]-a[0]).map(e=>+e[0]);
+  const base = ranks[0]*1e6 + ranks[1]*1e4 + ranks[2]*1e2 + ranks[3];
+  if (flush && straight) return { score: 8e9 + base, name: ranks[0]===12&&ranks[1]===11?"Royal Flush":"Straight Flush" };
+  if (grouped[0]===4) return { score: 7e9 + topRanks[0]*1e4 + topRanks[1], name:"Four of a Kind" };
+  if (grouped[0]===3&&grouped[1]===2) return { score: 6e9 + topRanks[0]*1e2 + topRanks[1], name:"Full House" };
+  if (flush) return { score: 5e9 + base, name:"Flush" };
+  if (straight) return { score: 4e9 + base, name:"Straight" };
+  if (grouped[0]===3) return { score: 3e9 + topRanks[0]*1e4 + topRanks[1]*1e2 + topRanks[2], name:"Three of a Kind" };
+  if (grouped[0]===2&&grouped[1]===2) return { score: 2e9 + Math.max(topRanks[0],topRanks[1])*1e6 + Math.min(topRanks[0],topRanks[1])*1e4 + topRanks[2], name:"Two Pair" };
+  if (grouped[0]===2) return { score: 1e9 + topRanks[0]*1e6 + topRanks[1]*1e4 + topRanks[2]*1e2 + topRanks[3], name:"One Pair" };
+  return { score: base, name:"High Card" };
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const btnStyle = (bg, hover, extra={}) => ({
+  background: bg, border:"none", borderRadius:6, padding:"8px 14px",
+  color:"#fff", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif",
+  transition:"background 0.15s", ...extra
+});
+
+const chip = (val) => {
+  if (val >= 1000) return `$${(val/1000).toFixed(val%1000?1:0)}k`;
+  return `$${val}`;
+};
+
+// ── Main App ───────────────────────────────────────────────────────────────
+const PHASES = ["preflop","flop","turn","river","showdown"];
+
+export default function PokerTracker() {
+  // Setup state
+  const [screen, setScreen]   = useState("setup"); // setup | game
+  const [playerNames, setPlayerNames] = useState(["Alice","Bob","Charlie","Diana"]);
+  const [newName, setNewName] = useState("");
+  const [buyIn, setBuyIn]     = useState(100);
+  const [smallBlind, setSmallBlind] = useState(5);
+  const [bigBlind, setBigBlind]     = useState(10);
+  const [blindTimer, setBlindTimer] = useState(0); // minutes, 0=manual
+  const [blindMultiplier, setBlindMultiplier] = useState(2);
+
+  // Game state
+  const [players, setPlayers]   = useState([]);
+  const [dealerIdx, setDealerIdx] = useState(0);
+  const [pot, setPot]           = useState(0);
+  const [sidePots, setSidePots] = useState([]);
+  const [phase, setPhase]       = useState("preflop");
+  const [currentSB, setCurrentSB] = useState(5);
+  const [currentBB, setCurrentBB] = useState(10);
+  const [communityCards, setCommunityCards] = useState([]);
+  const [bets, setBets]         = useState({});
+  const [activePicker, setActivePicker] = useState(null); // "community" | playerId
+  const [usedCards, setUsedCards] = useState([]);
+  const [activePlayer, setActivePlayer] = useState(0);
+  const [currentBet, setCurrentBet] = useState(0);
+  const [betInput, setBetInput] = useState("");
+  const [actionLog, setActionLog] = useState([]);
+  const [timerLeft, setTimerLeft] = useState(0);
+  const timerRef = useRef(null);
+  const [showHandResult, setShowHandResult] = useState(false);
+  const [showBlindsModal, setShowBlindsModal] = useState(false);
+  const [showCommunityPrompt, setShowCommunityPrompt] = useState(false); // auto-advance modal
+  const [pendingPhase, setPendingPhase] = useState(null);
+  const [showBuyIn, setShowBuyIn] = useState(null);
+  const [buyInAmount, setBuyInAmount] = useState("");
+  const [history, setHistory] = useState([]); // buy-in debts
+
+  // ── Timer ──
+  useEffect(() => {
+    if (screen !== "game" || blindTimer === 0) return;
+    setTimerLeft(blindTimer * 60);
+    timerRef.current = setInterval(() => {
+      setTimerLeft(t => {
+        if (t <= 1) {
+          setCurrentSB(s => s * blindMultiplier);
+          setCurrentBB(b => b * blindMultiplier);
+          return blindTimer * 60;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [screen, blindTimer, blindMultiplier]);
+
+  // ── Start Game ──
+  function startGame() {
+    const ps = playerNames.map((name, i) => ({
+      id: i, name,
+      stack: buyIn,
+      folded: false,
+      allIn: false,
+      holeCards: [],
+      bet: 0,
+      debt: 0,
+      active: true
+    }));
+    setPlayers(ps);
+    setCurrentSB(smallBlind);
+    setCurrentBB(bigBlind);
+    setPot(0);
+    setSidePots([]);
+    setPhase("preflop");
+    setCommunityCards([]);
+    setBets({});
+    setUsedCards([]);
+    setActionLog([]);
+    setActivePlayer((dealerIdx + 3) % ps.length);
+    setCurrentBet(bigBlind);
+    setScreen("game");
+    // Post blinds automatically
+    postBlinds(ps, dealerIdx, smallBlind, bigBlind);
+  }
+
+  function postBlinds(ps, dIdx, sb, bb) {
+    const sbIdx = (dIdx + 1) % ps.length;
+    const bbIdx = (dIdx + 2) % ps.length;
+    const updated = ps.map((p, i) => {
+      if (i === sbIdx) return { ...p, stack: p.stack - sb, bet: sb };
+      if (i === bbIdx) return { ...p, stack: p.stack - bb, bet: bb };
+      return p;
+    });
+    setPlayers(updated);
+    setPot(sb + bb);
+    setCurrentBet(bb);
+    log(`${ps[sbIdx].name} posts SB ${chip(sb)}, ${ps[bbIdx].name} posts BB ${chip(bb)}`);
+  }
+
+  function log(msg) { setActionLog(prev => [`${PHASES.indexOf(phase)>=0?phase.toUpperCase():"?"}: ${msg}`, ...prev.slice(0,39)]); }
+
+  // ── Actions ──
+  function getActive() { return players[activePlayer]; }
+
+  function nextActivePlayer(fromIdx, ps) {
+    let idx = (fromIdx + 1) % ps.length;
+    let tries = 0;
+    while ((ps[idx].folded || ps[idx].allIn) && tries < ps.length) {
+      idx = (idx + 1) % ps.length;
+      tries++;
+    }
+    return idx;
+  }
+
+  function doAction(action, amount) {
+    const p = players[activePlayer];
+    let updated = [...players];
+    let newPot = pot;
+    let newBet = currentBet;
+
+    if (action === "fold") {
+      updated[activePlayer] = { ...p, folded: true };
+      log(`${p.name} folds`);
+    } else if (action === "check") {
+      updated[activePlayer] = { ...p, acted: true };
+      log(`${p.name} checks`);
+    } else if (action === "call") {
+      const toCall = Math.min(currentBet - p.bet, p.stack);
+      updated[activePlayer] = { ...p, stack: p.stack - toCall, bet: p.bet + toCall, allIn: p.stack === toCall, acted: true };
+      newPot += toCall;
+      log(`${p.name} calls ${chip(toCall)}`);
+    } else if (action === "bet" || action === "raise") {
+      const amt = parseInt(amount) || 0;
+      const actual = Math.min(amt, p.stack);
+      updated = updated.map((pl, i) => i === activePlayer
+        ? { ...pl, stack: pl.stack - actual, bet: pl.bet + actual, allIn: pl.stack === actual, acted: true }
+        : { ...pl, acted: false });
+      newPot += actual;
+      newBet = p.bet + actual;
+      log(`${p.name} ${action}s ${chip(actual)}`);
+    } else if (action === "allin") {
+      const allInAmt = p.stack;
+      updated = updated.map((pl, i) => i === activePlayer
+        ? { ...pl, stack: 0, bet: pl.bet + allInAmt, allIn: true, acted: true }
+        : { ...pl, acted: false });
+      newPot += allInAmt;
+      if (p.bet + allInAmt > newBet) newBet = p.bet + allInAmt;
+      log(`${p.name} goes ALL IN ${chip(allInAmt)}`);
+    }
+
+    setPot(newPot);
+    setCurrentBet(newBet);
+    setPlayers(updated);
+    setBetInput("");
+
+    const remaining = updated.filter(pl => !pl.folded);
+    if (remaining.length === 1) {
+      awardPot(updated, remaining[0].id, newPot);
+      return;
+    }
+
+    const activePls = updated.filter(pl => !pl.folded && !pl.allIn);
+    const anyActed = activePls.some(pl => pl.acted);
+    const roundOver = anyActed && activePls.length > 0 && activePls.every(pl => pl.acted && pl.bet === newBet);
+
+    if (roundOver) {
+      const nextPhaseIdx = PHASES.indexOf(phase) + 1;
+      if (nextPhaseIdx < PHASES.length) {
+        const np = PHASES[nextPhaseIdx];
+        if (np === "showdown") {
+          setPhase("showdown");
+          setPlayers(prev => prev.map(pl => ({ ...pl, bet: 0, acted: false })));
+          setCurrentBet(0);
+          log(`--- SHOWDOWN ---`);
+        } else {
+          setPendingPhase(np);
+          setShowCommunityPrompt(true);
+        }
+      }
+      return;
+    }
+
+    setActivePlayer(nextActivePlayer(activePlayer, updated));
+  }
+
+  function confirmAdvancePhase(np) {
+    setShowCommunityPrompt(false);
+    setPhase(np);
+    setPlayers(prev => prev.map(pl => ({ ...pl, bet: 0, acted: false })));
+    setCurrentBet(0);
+    setBets({});
+    const sbIdx = (dealerIdx + 1) % players.length;
+    setActivePlayer(nextActivePlayer(sbIdx - 1, players));
+    log(`--- ${np.toUpperCase()} ---`);
+    if (np === "flop" || np === "turn" || np === "river") {
+      setActivePicker("community");
+    }
+  }
+
+  function awardPot(ps, winnerId, potAmt) {
+    const updated = ps.map(p => p.id === winnerId ? { ...p, stack: p.stack + potAmt } : p);
+    setPlayers(updated);
+    log(`🏆 ${ps[winnerId].name} wins ${chip(potAmt)}!`);
+    setPot(0);
+    setPhase("showdown");
+  }
+
+  function advancePhase() {
+    const nextPhaseIdx = PHASES.indexOf(phase) + 1;
+    if (nextPhaseIdx >= PHASES.length) return;
+    const np = PHASES[nextPhaseIdx];
+    if (np === "showdown") {
+      setPhase("showdown");
+      setPlayers(prev => prev.map(p => ({ ...p, bet: 0, acted: false })));
+      setCurrentBet(0);
+      log(`--- SHOWDOWN ---`);
+    } else {
+      setPendingPhase(np);
+      setShowCommunityPrompt(true);
+    }
+  }
+
+  function newHand() {
+    const newDealer = (dealerIdx + 1) % players.length;
+    setDealerIdx(newDealer);
+    const ps = players.map(p => ({ ...p, folded: false, allIn: false, holeCards: [], bet: 0, acted: false, active: p.stack > 0 }));
+    setPlayers(ps);
+    setPot(0);
+    setSidePots([]);
+    setPhase("preflop");
+    setCommunityCards([]);
+    setUsedCards([]);
+    setCurrentBet(currentBB);
+    setActivePlayer((newDealer + 3) % ps.length);
+    postBlinds(ps, newDealer, currentSB, currentBB);
+  }
+
+  function doBuyIn(playerId) {
+    const amt = parseInt(buyInAmount) || 0;
+    if (!amt) return;
+    setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, stack: p.stack + amt, debt: p.debt + amt } : p));
+    setHistory(h => [...h, { player: players.find(p=>p.id===playerId)?.name, amount: amt, time: new Date().toLocaleTimeString() }]);
+    setShowBuyIn(null);
+    setBuyInAmount("");
+  }
+
+  function addCommunityCard(rank, suit) {
+    const cardId = rank + suit;
+    setUsedCards(prev => [...prev, cardId]);
+    setCommunityCards(prev => {
+      const next = [...prev, { rank, suit }];
+      // For flop we need 3 cards — keep picker open until we have them
+      const targetCount = (phase === "flop" || pendingPhase === "flop") ? 3 : next.length;
+      if (next.length < targetCount) {
+        // keep picker open
+      } else {
+        setTimeout(() => setActivePicker(null), 0);
+      }
+      return next;
+    });
+  }
+  function addHoleCard(playerId, rank, suit) {
+    const cardId = rank + suit;
+    setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, holeCards: [...p.holeCards, { rank, suit }] } : p));
+    setUsedCards(prev => [...prev, cardId]);
+    setActivePicker(null);
+  }
+  function removeCard(type, idx, playerId) {
+    if (type === "community") {
+      const card = communityCards[idx];
+      setCommunityCards(prev => prev.filter((_,i)=>i!==idx));
+      setUsedCards(prev => prev.filter(c => c !== card.rank+card.suit));
+    } else {
+      const card = players.find(p=>p.id===playerId).holeCards[idx];
+      setPlayers(prev => prev.map(p => p.id===playerId ? { ...p, holeCards: p.holeCards.filter((_,i)=>i!==idx) } : p));
+      setUsedCards(prev => prev.filter(c => c !== card.rank+card.suit));
+    }
+  }
+
+  function evaluateWinner() {
+    const active = players.filter(p => !p.folded && p.holeCards.length === 2);
+    if (active.length === 0) return [];
+    const allCards = [...communityCards];
+    return active.map(p => {
+      const hand = evaluateHand([...p.holeCards, ...allCards]);
+      return { ...p, hand };
+    }).sort((a,b) => b.hand.score - a.hand.score);
+  }
+
+  const activePlayers = players.filter(p => !p.folded && p.active);
+  const timerDisplay = timerLeft > 0 ? `${Math.floor(timerLeft/60)}:${String(timerLeft%60).padStart(2,"0")}` : null;
+  const sbIdx = (dealerIdx + 1) % players.length;
+  const bbIdx = (dealerIdx + 2) % players.length;
+
+  // ── SETUP SCREEN ─────────────────────────────────────────────────────────
+  if (screen === "setup") return (
+    <div style={{ minHeight:"100vh", background:"#0a1a0a", fontFamily:"'DM Sans',sans-serif", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600&display=swap');`}</style>
+      <div style={{ maxWidth:520, width:"100%" }}>
+        <h1 style={{ fontFamily:"'Playfair Display',serif", color:"#a3d977", fontSize:36, textAlign:"center", marginBottom:4, letterSpacing:2 }}>♠ POKER NIGHT</h1>
+        <p style={{ color:"#4a7a4a", textAlign:"center", marginBottom:32, fontSize:14 }}>Set up your game</p>
+
+        {/* Players */}
+        <Section title="Players">
+          {playerNames.map((n,i) => (
+            <div key={i} style={{ display:"flex", gap:8, marginBottom:8, alignItems:"center" }}>
+              <div style={{ color:"#a3d977", width:20, fontSize:13 }}>{i+1}.</div>
+              <input value={n} onChange={e => setPlayerNames(prev => prev.map((x,j)=>j===i?e.target.value:x))}
+                style={inputStyle} />
+              {playerNames.length > 2 && (
+                <button onClick={() => setPlayerNames(prev => prev.filter((_,j)=>j!==i))} style={btnStyle("#7f1d1d","#991b1b",{padding:"6px 10px"})}>✕</button>
+              )}
+            </div>
+          ))}
+          <div style={{ display:"flex", gap:8, marginTop:8 }}>
+            <input value={newName} onChange={e=>setNewName(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter"&&newName.trim()){setPlayerNames(p=>[...p,newName.trim()]);setNewName("");}}}
+              placeholder="Add player…" style={{ ...inputStyle, flex:1 }} />
+            <button onClick={()=>{ if(newName.trim()){setPlayerNames(p=>[...p,newName.trim()]);setNewName("");}}} style={btnStyle("#2d5a2d","#3a7a3a")}>+ Add</button>
+          </div>
+        </Section>
+
+        {/* Buy-in & Blinds */}
+        <Section title="Buy-in & Blinds">
+          <Row label="Buy-in per player">
+            <input type="number" value={buyIn} onChange={e=>setBuyIn(+e.target.value)} style={{ ...inputStyle, width:100 }} />
+          </Row>
+          <Row label="Small Blind">
+            <input type="number" value={smallBlind} onChange={e=>setSmallBlind(+e.target.value)} style={{ ...inputStyle, width:100 }} />
+          </Row>
+          <Row label="Big Blind">
+            <input type="number" value={bigBlind} onChange={e=>setBigBlind(+e.target.value)} style={{ ...inputStyle, width:100 }} />
+          </Row>
+        </Section>
+
+        {/* Blind Timer */}
+        <Section title="Blind Timer (optional)">
+          <Row label="Increase blinds every (min, 0 = manual)">
+            <input type="number" value={blindTimer} onChange={e=>setBlindTimer(+e.target.value)} style={{ ...inputStyle, width:80 }} />
+          </Row>
+          <Row label="Multiplier on increase">
+            <input type="number" step="0.5" value={blindMultiplier} onChange={e=>setBlindMultiplier(+e.target.value)} style={{ ...inputStyle, width:80 }} />
+          </Row>
+        </Section>
+
+        <button onClick={startGame} style={{ ...btnStyle("linear-gradient(135deg,#2d7a2d,#4aaa4a)",""), width:"100%", padding:"14px", fontSize:16, fontFamily:"'Playfair Display',serif", letterSpacing:1, marginTop:8 }}>
+          Start Game ♦
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── GAME SCREEN ───────────────────────────────────────────────────────────
+  const ranked = evaluateWinner();
+  return (
+    <div style={{ minHeight:"100vh", background:"#0a1a0a", fontFamily:"'DM Sans',sans-serif", color:"#e2e8f0", padding:16 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600&display=swap'); button:hover{filter:brightness(1.2)}`}</style>
+
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:8 }}>
+        <h1 style={{ fontFamily:"'Playfair Display',serif", color:"#a3d977", fontSize:22, margin:0 }}>♠ Poker Night</h1>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          {timerDisplay && (
+            <div style={{ background:"#1a2a1a", border:"1px solid #2d5a2d", borderRadius:8, padding:"4px 12px", color:"#a3d977", fontSize:14, fontFamily:"monospace" }}>
+              🕑 {timerDisplay} — Blinds up in
+            </div>
+          )}
+          <div style={{ background:"#1a2a1a", border:"1px solid #2d5a2d", borderRadius:8, padding:"4px 12px", color:"#94a3b8", fontSize:13 }}>
+            SB {chip(currentSB)} / BB {chip(currentBB)}
+          </div>
+          <button onClick={()=>setShowBlindsModal(true)} style={btnStyle("#1e3a2a","#2d5a3a",{fontSize:12})}>⚙ Blinds</button>
+          <button onClick={()=>setScreen("setup")} style={btnStyle("#1a1a2a","#2a2a3a",{fontSize:12})}>↩ Setup</button>
+        </div>
+      </div>
+
+      {/* Pot */}
+      <div style={{ textAlign:"center", marginBottom:16 }}>
+        <div style={{ display:"inline-block", background:"linear-gradient(135deg,#1a3a1a,#0f2a0f)", border:"2px solid #4a9a4a", borderRadius:16, padding:"10px 32px" }}>
+          <div style={{ color:"#94a3b8", fontSize:11, letterSpacing:2, textTransform:"uppercase" }}>Main Pot</div>
+          <div style={{ color:"#a3d977", fontSize:32, fontFamily:"'Playfair Display',serif" }}>{chip(pot)}</div>
+        </div>
+      </div>
+
+      {/* Community Cards */}
+      <div style={{ background:"#0f2a0f", border:"1px solid #1a4a1a", borderRadius:12, padding:16, marginBottom:16 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+          <span style={{ color:"#a3d977", fontSize:13, fontFamily:"'Playfair Display',serif", letterSpacing:1 }}>COMMUNITY CARDS</span>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            {["preflop","flop","turn","river","showdown"].map(ph => (
+              <div key={ph} style={{ padding:"2px 8px", borderRadius:20, fontSize:11, background: phase===ph?"#2d7a2d":"#1a2a1a", color: phase===ph?"#fff":"#4a6a4a", border:"1px solid #2a4a2a" }}>{ph}</div>
+            ))}
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+          {communityCards.map((c,i) => (
+            <div key={i} style={{ position:"relative" }}>
+              <CardFace rank={c.rank} suit={c.suit} />
+              <button onClick={()=>removeCard("community",i)} style={{ position:"absolute", top:-6, right:-6, background:"#7f1d1d", border:"none", borderRadius:"50%", width:18, height:18, color:"#fff", fontSize:10, cursor:"pointer", lineHeight:"18px", textAlign:"center" }}>✕</button>
+            </div>
+          ))}
+          {communityCards.length < 5 && (
+            <div onClick={()=>setActivePicker("community")} style={{ width:56, height:78, border:"2px dashed #2d5a2d", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", color:"#2d7a2d", fontSize:24, background:"#0a1a0a" }}>+</div>
+          )}
+        </div>
+      </div>
+
+      {/* Players Grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:12, marginBottom:16 }}>
+        {players.map((p, i) => {
+          const isDealer = i === dealerIdx;
+          const isSB = i === sbIdx;
+          const isBB = i === bbIdx;
+          const isTurn = i === activePlayer && phase !== "showdown";
+          const handResult = ranked.find(r=>r.id===p.id);
+          return (
+            <div key={p.id} style={{
+              background: p.folded ? "#0f0f0f" : isTurn ? "linear-gradient(135deg,#1a3a1a,#0f2a15)" : "#0f1f0f",
+              border: `2px solid ${p.folded?"#1a1a1a":isTurn?"#a3d977":"#1a3a1a"}`,
+              borderRadius:12, padding:14, opacity: p.folded ? 0.5 : 1,
+              transition:"all 0.2s"
+            }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontWeight:600, color: isTurn?"#a3d977":"#e2e8f0", fontSize:15 }}>{p.name}</span>
+                  {isDealer && <Badge color="#d4a017">D</Badge>}
+                  {isSB && <Badge color="#60a5fa">SB</Badge>}
+                  {isBB && <Badge color="#f87171">BB</Badge>}
+                  {p.allIn && <Badge color="#f97316">ALL IN</Badge>}
+                  {p.folded && <Badge color="#4a4a4a">FOLDED</Badge>}
+                </div>
+                <button onClick={()=>{setShowBuyIn(p.id);setBuyInAmount("");}} style={btnStyle("#1e3a1a","#2d5a2a",{fontSize:11,padding:"3px 8px"})}>+ Buy In</button>
+              </div>
+
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
+                <div><div style={{ color:"#64748b", fontSize:11 }}>Stack</div><div style={{ color:"#a3d977", fontSize:18, fontFamily:"'Playfair Display',serif" }}>{chip(p.stack)}</div></div>
+                {p.bet > 0 && <div><div style={{ color:"#64748b", fontSize:11 }}>Bet</div><div style={{ color:"#fbbf24", fontSize:16 }}>{chip(p.bet)}</div></div>}
+                {p.debt > 0 && <div><div style={{ color:"#64748b", fontSize:11 }}>Owes</div><div style={{ color:"#f87171", fontSize:14 }}>{chip(p.debt)}</div></div>}
+              </div>
+
+              {/* Hole Cards */}
+              <div style={{ display:"flex", gap:6, marginBottom:10, alignItems:"center", flexWrap:"wrap" }}>
+                {p.holeCards.map((c,ci) => (
+                  <div key={ci} style={{ position:"relative" }}>
+                    <CardFace rank={c.rank} suit={c.suit} small />
+                    <button onClick={()=>removeCard("hole",ci,p.id)} style={{ position:"absolute", top:-5, right:-5, background:"#7f1d1d", border:"none", borderRadius:"50%", width:15, height:15, color:"#fff", fontSize:9, cursor:"pointer" }}>✕</button>
+                  </div>
+                ))}
+                {p.holeCards.length < 2 && !p.folded && (
+                  <div onClick={()=>setActivePicker({type:"hole",playerId:p.id})} style={{ width:36, height:50, border:"2px dashed #2d5a2d", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", color:"#2d7a2d", fontSize:18 }}>+</div>
+                )}
+                {handResult && phase==="showdown" && (
+                  <div style={{ marginLeft:6, padding:"2px 8px", background:"#1a3a1a", borderRadius:20, fontSize:11, color: ranked[0].id===p.id?"#a3d977":"#94a3b8", border:`1px solid ${ranked[0].id===p.id?"#4a9a4a":"#2a3a2a"}` }}>
+                    {ranked[0].id===p.id && "🏆 "}{handResult.hand.name}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions for active player */}
+              {isTurn && !p.folded && (
+                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                  <button onClick={()=>doAction("fold")} style={btnStyle("#7f1d1d","#991b1b",{fontSize:12,padding:"5px 10px"})}>Fold</button>
+                  {currentBet === p.bet && <button onClick={()=>doAction("check")} style={btnStyle("#1e3a5f","#1d4ed8",{fontSize:12,padding:"5px 10px"})}>Check</button>}
+                  {currentBet > p.bet && <button onClick={()=>doAction("call")} style={btnStyle("#1e3a5f","#1d4ed8",{fontSize:12,padding:"5px 10px"})}>Call {chip(Math.min(currentBet-p.bet,p.stack))}</button>}
+                  <button onClick={()=>doAction("allin")} style={btnStyle("#7c3aed","#6d28d9",{fontSize:12,padding:"5px 10px"})}>All In</button>
+                  <div style={{ display:"flex", gap:4 }}>
+                    <input type="number" value={betInput} onChange={e=>setBetInput(e.target.value)} placeholder="Amt" style={{ ...inputStyle, width:70, padding:"5px 8px", fontSize:12 }} />
+                    <button onClick={()=>doAction(currentBet>0?"raise":"bet",betInput)} style={btnStyle("#d97706","#b45309",{fontSize:12,padding:"5px 8px"})}>
+                      {currentBet > 0 ? "Raise" : "Bet"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Game Controls */}
+      <div style={{ background:"#0f1f0f", border:"1px solid #1a3a1a", borderRadius:12, padding:16, marginBottom:16, display:"flex", gap:10, flexWrap:"wrap", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {phase !== "showdown" && (
+            <button onClick={advancePhase} style={btnStyle("#2d5a2d","#3a7a3a")}>
+              Next Phase → {PHASES[PHASES.indexOf(phase)+1]?.toUpperCase() || "END"}
+            </button>
+          )}
+          <button onClick={newHand} style={btnStyle("#1e3a5f","#1d4ed8")}>🃏 New Hand</button>
+          {phase === "showdown" && (
+            <button onClick={()=>setShowHandResult(true)} style={btnStyle("#d97706","#b45309")}>🏆 Show Winner</button>
+          )}
+        </div>
+        <div style={{ color:"#4a6a4a", fontSize:12 }}>{activePlayers.length} players active</div>
+      </div>
+
+      {/* Action Log */}
+      <div style={{ background:"#050f05", border:"1px solid #0f1f0f", borderRadius:12, padding:14, maxHeight:140, overflowY:"auto" }}>
+        <div style={{ color:"#2d5a2d", fontSize:11, letterSpacing:2, marginBottom:8 }}>ACTION LOG</div>
+        {actionLog.length === 0 && <div style={{ color:"#2a3a2a", fontSize:12 }}>No actions yet.</div>}
+        {actionLog.map((l,i) => (
+          <div key={i} style={{ color: i===0?"#a3d977":"#4a6a4a", fontSize:12, marginBottom:4, fontFamily:"monospace" }}>{l}</div>
+        ))}
+      </div>
+
+      {/* ── Modals ── */}
+      {showCommunityPrompt && pendingPhase && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"#0f1f0f", border:"2px solid #4a9a4a", borderRadius:16, padding:28, maxWidth:400, width:"90%", textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:12 }}>🂠</div>
+            <div style={{ fontFamily:"'Playfair Display',serif", color:"#a3d977", fontSize:22, marginBottom:8 }}>
+              {pendingPhase.toUpperCase()}
+            </div>
+            <div style={{ color:"#94a3b8", fontSize:14, marginBottom:24 }}>
+              Betting round complete!<br/>
+              {pendingPhase === "flop" && "Deal 3 community cards, then enter them below."}
+              {pendingPhase === "turn" && "Deal 1 community card (the turn), then enter it below."}
+              {pendingPhase === "river" && "Deal 1 community card (the river), then enter it below."}
+            </div>
+            <button
+              onClick={() => confirmAdvancePhase(pendingPhase)}
+              style={{ ...btnStyle("linear-gradient(135deg,#2d7a2d,#4aaa4a)",""), width:"100%", padding:"12px", fontSize:15, fontFamily:"'Playfair Display',serif", letterSpacing:1 }}>
+              Enter {pendingPhase === "flop" ? "3 Cards" : "Card"} →
+            </button>
+          </div>
+        </div>
+      )}
+      {activePicker === "community" && (
+        <CardPicker
+          usedCards={usedCards}
+          onSelect={addCommunityCard}
+          onClose={()=>setActivePicker(null)}
+          maxCards={phase === "flop" || pendingPhase === "flop" ? 3 : 1}
+          currentCount={communityCards.length}
+        />
+      )}
+      {activePicker && activePicker.type === "hole" && (
+        <CardPicker
+          usedCards={usedCards}
+          onSelect={(r,s)=>addHoleCard(activePicker.playerId,r,s)}
+          onClose={()=>setActivePicker(null)}
+          maxCards={1}
+          currentCount={0}
+        />
+      )}
+
+      {showBlindsModal && (
+        <Modal title="⚙ Adjust Blinds" onClose={()=>setShowBlindsModal(false)}>
+          <Row label="Small Blind"><input type="number" value={currentSB} onChange={e=>setCurrentSB(+e.target.value)} style={{ ...inputStyle, width:100 }} /></Row>
+          <Row label="Big Blind"><input type="number" value={currentBB} onChange={e=>setCurrentBB(+e.target.value)} style={{ ...inputStyle, width:100 }} /></Row>
+          <Row label="Timer (min, 0=off)"><input type="number" value={blindTimer} onChange={e=>setBlindTimer(+e.target.value)} style={{ ...inputStyle, width:80 }} /></Row>
+          <Row label="Multiplier"><input type="number" step="0.5" value={blindMultiplier} onChange={e=>setBlindMultiplier(+e.target.value)} style={{ ...inputStyle, width:80 }} /></Row>
+          <button onClick={()=>setShowBlindsModal(false)} style={{ ...btnStyle("#2d5a2d","#3a7a3a"), marginTop:10 }}>Save</button>
+        </Modal>
+      )}
+
+      {showBuyIn !== null && (
+        <Modal title="💰 Buy In" onClose={()=>setShowBuyIn(null)}>
+          <p style={{ color:"#94a3b8", fontSize:13 }}>{players.find(p=>p.id===showBuyIn)?.name} re-buys:</p>
+          <input type="number" value={buyInAmount} onChange={e=>setBuyInAmount(e.target.value)} placeholder={`Amount (default ${buyIn})`} style={{ ...inputStyle, width:"100%", marginBottom:12 }} />
+          <button onClick={()=>doBuyIn(showBuyIn)} style={{ ...btnStyle("#2d5a2d","#3a7a3a"), width:"100%", padding:10 }}>Confirm Buy In</button>
+          {history.filter(h=>h.player===players.find(p=>p.id===showBuyIn)?.name).length > 0 && (
+            <div style={{ marginTop:12, color:"#64748b", fontSize:12 }}>
+              {history.filter(h=>h.player===players.find(p=>p.id===showBuyIn)?.name).map((h,i)=>(
+                <div key={i}>{h.time}: +{chip(h.amount)}</div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {showHandResult && (
+        <Modal title="🏆 Hand Results" onClose={()=>setShowHandResult(false)}>
+          {ranked.length === 0 && <p style={{ color:"#94a3b8" }}>Add hole cards to evaluate hands.</p>}
+          {ranked.map((p,i) => (
+            <div key={p.id} style={{ display:"flex", gap:12, alignItems:"center", marginBottom:12, padding:10, background: i===0?"#1a3a1a":"#0f1f0f", borderRadius:8, border:`1px solid ${i===0?"#4a9a4a":"#1a2a1a"}` }}>
+              <span style={{ color:i===0?"#a3d977":"#64748b", fontSize:18, width:24 }}>{i===0?"🥇":i===1?"🥈":"🥉"}</span>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:600, color: i===0?"#a3d977":"#e2e8f0" }}>{p.name}</div>
+                <div style={{ fontSize:12, color:"#64748b" }}>{p.hand.name}</div>
+              </div>
+              <div style={{ display:"flex", gap:4 }}>
+                {p.holeCards.map((c,ci)=><CardFace key={ci} rank={c.rank} suit={c.suit} small />)}
+              </div>
+              {i===0 && (
+                <button onClick={()=>{ awardPot(players, p.id, pot); setShowHandResult(false); }} style={btnStyle("#2d7a2d","#3a9a3a",{fontSize:12})}>Award Pot {chip(pot)}</button>
+              )}
+            </div>
+          ))}
+          <div style={{ marginTop:8 }}>
+            <div style={{ color:"#4a6a4a", fontSize:12, marginBottom:8 }}>Or manually award to:</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              {players.filter(p=>!p.folded).map(p=>(
+                <button key={p.id} onClick={()=>{ awardPot(players,p.id,pot); setShowHandResult(false); }} style={btnStyle("#1e3a5f","#1d4ed8",{fontSize:12})}>{p.name}</button>
+              ))}
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Small components ─────────────────────────────────────────────────────
+function Badge({ color, children }) {
+  return <span style={{ background: color+"22", border:`1px solid ${color}55`, color, borderRadius:20, fontSize:10, padding:"1px 6px", fontWeight:700 }}>{children}</span>;
+}
+function Section({ title, children }) {
+  return (
+    <div style={{ background:"#0f1f0f", border:"1px solid #1a3a1a", borderRadius:10, padding:16, marginBottom:16 }}>
+      <div style={{ color:"#a3d977", fontSize:12, fontFamily:"'Playfair Display',serif", letterSpacing:2, textTransform:"uppercase", marginBottom:12 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+function Row({ label, children }) {
+  return (
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+      <span style={{ color:"#94a3b8", fontSize:13 }}>{label}</span>
+      {children}
+    </div>
+  );
+}
+function Modal({ title, children, onClose }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", zIndex:999, display:"flex", alignItems:"center", justifyContent:"center" }}
+         onClick={onClose}>
+      <div style={{ background:"#0f1f0f", border:"1px solid #2d5a2d", borderRadius:14, padding:24, maxWidth:440, width:"90%", maxHeight:"80vh", overflowY:"auto" }}
+           onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <span style={{ color:"#a3d977", fontFamily:"'Playfair Display',serif", fontSize:18 }}>{title}</span>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:"#4a6a4a", fontSize:20, cursor:"pointer" }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+const inputStyle = { background:"#0a1a0a", border:"1px solid #2a4a2a", borderRadius:6, padding:"7px 10px", color:"#e2e8f0", fontSize:13, fontFamily:"'DM Sans',sans-serif", outline:"none" };
