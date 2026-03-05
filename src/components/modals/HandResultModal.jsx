@@ -80,11 +80,17 @@ export function HandResultModal({
           })}
 
           {/* Once all side pots awarded, show Next Hand */}
-          {sidePots.every(sp=>sp.awarded)&&(
+          {sidePots.every(sp=>sp.awarded)&&onStartNextHand&&(
             <Button onClick={onStartNextHand}
               bg={t.green} style={{width:"100%",padding:"13px",fontSize:15,fontWeight:700,borderRadius:12,marginTop:4}}>
               🃏 Start Next Hand
             </Button>
+          )}
+          
+          {sidePots.every(sp=>sp.awarded)&&!onStartNextHand&&(
+            <div style={{padding:"12px",background:t.surface2,borderRadius:10,textAlign:"center",color:t.textMuted,fontSize:14,marginTop:4}}>
+              Only one player remaining. Add more players to continue.
+            </div>
           )}
         </div>
       )}
@@ -162,11 +168,17 @@ export function HandResultModal({
               </div>
             </div>
 
-            {potAwarded&&(
+            {potAwarded&&onStartNextHand&&(
               <Button onClick={onStartNextHand}
                 bg={t.green} style={{width:"100%",padding:"13px",fontSize:15,fontWeight:700,borderRadius:12}}>
                 🃏 Start Next Hand
               </Button>
+            )}
+            
+            {potAwarded&&!onStartNextHand&&(
+              <div style={{padding:"12px",background:t.surface2,borderRadius:10,textAlign:"center",color:t.textMuted,fontSize:14}}>
+                Only one player remaining. Add more players to continue.
+              </div>
             )}
           </>
         );

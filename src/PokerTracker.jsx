@@ -24,6 +24,7 @@ import { SummaryModal } from './components/modals/SummaryModal';
 import { GameWinnerModal } from './components/modals/GameWinnerModal';
 import { ConfirmBackModal } from './components/modals/ConfirmBackModal';
 import { ExportGameModal } from './components/modals/ExportGameModal';
+import { GameTranscriptModal } from './components/modals/GameTranscriptModal';
 
 export default function PokerTracker() {
   const [dark, setDark] = useState(false);
@@ -34,9 +35,9 @@ export default function PokerTracker() {
   const [playerNames, setPlayerNames] = useState(["Alice","Bob","Charlie","Diana"]);
   const [playerAmounts, setPlayerAmounts] = useState({});
   const [newName, setNewName] = useState("");
-  const [buyIn, setBuyIn] = useState(100);
-  const [smallBlind, setSmallBlind] = useState(5);
-  const [bigBlind, setBigBlind] = useState(10);
+  const [buyIn, setBuyIn] = useState(1000000);
+  const [smallBlind, setSmallBlind] = useState(10000);
+  const [bigBlind, setBigBlind] = useState(20000);
   const [blindTimer, setBlindTimer] = useState(0);
   const [blindMultiplier, setBlindMultiplier] = useState(2);
 
@@ -46,9 +47,9 @@ export default function PokerTracker() {
   const [sidePots, setSidePots] = useState([]);
   const [accumulatedPot, setAccumulatedPot] = useState(0);
   const [phase, setPhase] = useState("preflop");
-  const [currentSB, setCurrentSB] = useState(5);
-  const [currentBB, setCurrentBB] = useState(10);
-  const [lastRaiseSize, setLastRaiseSize] = useState(10);
+  const [currentSB, setCurrentSB] = useState(10000);
+  const [currentBB, setCurrentBB] = useState(20000);
+  const [lastRaiseSize, setLastRaiseSize] = useState(20000);
   const [communityCards, setCommunityCards] = useState([]);
   const [activePicker, setActivePicker] = useState(null);
   const [usedCards, setUsedCards] = useState([]);
@@ -76,6 +77,7 @@ export default function PokerTracker() {
   const [hadSidePots, setHadSidePots] = useState(false);
   const [showConfirmBack, setShowConfirmBack] = useState(false);
   const [showExportGame, setShowExportGame] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
 
   const [initialStacks, setInitialStacks] = useState({});
 
@@ -175,8 +177,16 @@ export default function PokerTracker() {
   }
 
   function postBlindsTo(ps,dIdx,sb,bb) {
-    const activePsIdx=ps.map((_,i)=>i).filter(i=>ps[i].stack>0||ps[i].allIn);
-    const dActivePos=activePsIdx.indexOf(dIdx)>=0?activePsIdx.indexOf(dIdx):0;
+    const activePsIdx=ps.map((_,i)=>i).filter(i=>ps[i].stack>0&&ps[i].active);
+    if(activePsIdx.length===0) return;
+    
+    let dActivePos = activePsIdx.indexOf(dIdx);
+    if(dActivePos < 0) {
+      // Dealer is not in active players, find closest active player after dealer position
+      dActivePos = activePsIdx.findIndex(i => i > dIdx);
+      if(dActivePos < 0) dActivePos = 0; // Wrap around to first active player
+    }
+    
     const headsUp=activePsIdx.length===2;
     const siActive=headsUp?dActivePos:(dActivePos+1)%activePsIdx.length;
     const biActive=headsUp?(dActivePos+1)%activePsIdx.length:(dActivePos+2)%activePsIdx.length;
@@ -193,7 +203,7 @@ export default function PokerTracker() {
 
   function nextActive(fromIdx,ps){
     let idx=(fromIdx+1)%ps.length, tries=0;
-    while((ps[idx].folded||ps[idx].allIn||(ps[idx].stack===0&&!ps[idx].allIn))&&tries<ps.length){
+    while((ps[idx].folded||ps[idx].allIn||(ps[idx].stack===0&&!ps[idx].allIn)||!ps[idx].active)&&tries<ps.length){
       idx=(idx+1)%ps.length; tries++;
     }
     return idx;
@@ -249,25 +259,37 @@ export default function PokerTracker() {
       return;
     }
 
-    const activePls=up.filter(pl=>!pl.folded&&!pl.allIn&&pl.stack>0);
+    const activePls=up.filter(pl=>!pl.folded&&!pl.allIn&&pl.stack>0&&pl.active);
     const anyActed=activePls.some(pl=>pl.acted);
-    const roundOver=anyActed&&(activePls.length===0||activePls.every(pl=>pl.acted&&pl.bet===nb));
+    // Round is over if: no active players left (all all-in/folded), OR all active players have acted and matched the bet
+    const roundOver=activePls.length===0||(anyActed&&activePls.every(pl=>pl.acted&&pl.bet===nb));
 
     if(roundOver){ triggerNextPhase(up); return; }
     setActivePlayer(nextActive(activePlayer,up));
   }
 
   function triggerNextPhase(up) {
+    // Check if we should skip to showdown
+    const nonFolded = up.filter(pl => !pl.folded);
+    const activePls = nonFolded.filter(pl => !pl.allIn && pl.stack > 0);
+    
+    // If 0 or 1 player can still act, skip directly to showdown
+    const shouldSkipToShowdown = activePls.length <= 1;
+    
     const ni=PHASES.indexOf(phase)+1;
     if(ni>=PHASES.length) return;
-    const np=PHASES[ni];
+    const np=shouldSkipToShowdown ? "showdown" : PHASES[ni];
     const streetBets=up.reduce((s,p)=>s+p.bet,0);
-    setAccumulatedPot(prev=>prev+streetBets);
     if(np==="showdown"){
+      // For showdown, we handle everything here (no confirmAdvancePhase call)
+      setAccumulatedPot(prev=>prev+streetBets);
       setPhase("showdown");
       setPlayers(prev=>prev.map(pl=>({...pl,bet:0,acted:false})));
       setCurrentBet(0); addLog("Showdown — enter hole cards to evaluate","showdown");
-    } else { setPendingPhase(np); setShowCommunityPrompt(true); }
+    } else { 
+      // For flop/turn/river, don't accumulate here - confirmAdvancePhase will do it
+      setPendingPhase(np); setShowCommunityPrompt(true); 
+    }
   }
 
   function confirmAdvancePhase(np){
@@ -325,16 +347,33 @@ export default function PokerTracker() {
     setStateHistory([]); // Clear undo history when starting new hand
     setCanUndo(false);
     
-    const nd=(curDealerIdx+1)%curPlayers.length;
+    // Find next active dealer (with stack > 0), starting from the position after current dealer
+    let nd = (curDealerIdx + 1) % curPlayers.length;
+    let tries = 0;
+    while(tries < curPlayers.length && (curPlayers[nd].stack <= 0 || !curPlayers[nd].active)) {
+      nd = (nd + 1) % curPlayers.length;
+      tries++;
+    }
+    // If no active players found, use next position anyway
+    if(tries === curPlayers.length) {
+      nd = (curDealerIdx + 1) % curPlayers.length;
+    }
+    
     setDealerIdx(nd);
-    const ps=curPlayers.map(p=>({...p,folded:false,allIn:false,holeCards:[],bet:0,handContrib:0,acted:false,active:p.stack>0}));
+    const ps=curPlayers.map(p=>({...p,stack:p.stack+p.bet,folded:false,allIn:false,holeCards:[],bet:0,handContrib:0,acted:false,active:p.stack+p.bet>0}));
     const activePlayers=ps.filter(p=>p.stack>0);
     if(activePlayers.length===1){
       setGameWinner(activePlayers[0]);
       setPlayers(ps); return;
     }
     setPlayers(ps); setSidePots([]); setAccumulatedPot(0); setPotAwarded(false); setHadSidePots(false); setPhase("preflop"); setCommunityCards([]); setUsedCards([]);
-    setCurrentBet(currentBB); setLastRaiseSize(currentBB); setActivePlayer(ps.length===2?nd:(nd+3)%ps.length);
+    setCurrentBet(currentBB); setLastRaiseSize(currentBB);
+    
+    // Find first active player after blinds are posted
+    const firstToAct = ps.length===2 ? nd : (nd+3)%ps.length;
+    const validFirstPlayer = nextActive((firstToAct-1+ps.length)%ps.length, ps);
+    setActivePlayer(validFirstPlayer);
+    
     postBlindsTo(ps,nd,currentSB,currentBB);
   }
 
@@ -373,9 +412,31 @@ export default function PokerTracker() {
 
   function doBuyIn(playerId){
     const amt=parseInt(buyInAmount)||buyIn;
-    setPlayers(prev=>prev.map(p=>p.id===playerId?{...p,stack:p.stack+amt,debt:(p.debt||0)+amt}:p));
+    const up=players.map(p=>{
+      if(p.id!==playerId) return p;
+      // Add buy-in amount, then deduct big blind as posting
+      const newStack=p.stack+amt-currentBB;
+      return {
+        ...p,
+        stack:newStack,
+        bet:currentBB,
+        handContrib:(p.handContrib||0)+currentBB,
+        active:true,
+        debt:(p.debt||0)+amt
+      };
+    });
+    
     setInitialStacks(prev=>({...prev,[playerId]:(prev[playerId]||0)+amt}));
     setBuyInHistory(h=>[...h,{player:players.find(p=>p.id===playerId)?.name,amount:amt,time:new Date().toLocaleTimeString()}]);
+    
+    // Add log entry for big blind posting
+    const playerName=players.find(p=>p.id===playerId)?.name;
+    addLog(`${playerName} buys in ${chip(amt)} and posts BB ${chip(currentBB)}`);
+    
+    // Recompute side pots with the new player's contribution
+    recomputeSidePots(up);
+    setPlayers(up);
+    setGameWinner(null); // Clear game winner state so game can continue
     setShowBuyIn(null); setBuyInAmount("");
   }
 
@@ -406,12 +467,30 @@ export default function PokerTracker() {
   }
 
   const ranked = evaluateWinner();
-  const si=(dealerIdx+1)%Math.max(players.length,1);
-  const bi=(dealerIdx+2)%Math.max(players.length,1);
+  
+  // Calculate SB and BB positions based on active players only
+  const activePsIdx = players.map((_,i)=>i).filter(i=>players[i].stack>0&&players[i].active);
+  let si = -1, bi = -1;
+  if(activePsIdx.length >= 2) {
+    let dActivePos = activePsIdx.indexOf(dealerIdx);
+    if(dActivePos < 0) {
+      // Dealer is not in active players, find closest active player after dealer position
+      dActivePos = activePsIdx.findIndex(i => i > dealerIdx);
+      if(dActivePos < 0) dActivePos = 0; // Wrap around to first active player
+    }
+    const headsUp = activePsIdx.length === 2;
+    const siActive = headsUp ? dActivePos : (dActivePos+1)%activePsIdx.length;
+    const biActive = headsUp ? (dActivePos+1)%activePsIdx.length : (dActivePos+2)%activePsIdx.length;
+    si = activePsIdx[siActive];
+    bi = activePsIdx[biActive];
+  }
+  
   const td=timerLeft>0?`${Math.floor(timerLeft/60)}:${String(timerLeft%60).padStart(2,"0")}`:null;
 
   const mainPot = players.reduce((s,p)=>s+p.bet,0);
-  const totalPotDisplay = mainPot + accumulatedPot + sidePots.reduce((s,sp)=>s+sp.amount,0);
+  // Total pot = accumulated bets from previous streets + current street bets
+  // sidePots are already counted in handContrib, don't add separately
+  const totalPotDisplay = mainPot + accumulatedPot;
 
   const activeP = players[activePlayer];
   const minRaise = activeP ? currentBet + lastRaiseSize : currentBB;
@@ -487,6 +566,7 @@ export default function PokerTracker() {
             SB {chip(currentSB)} / BB {chip(currentBB)}
           </div>
           <button onClick={()=>setShowBlindsModal(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:15}}>⚙</button>
+          <button onClick={()=>setShowTranscript(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:13,fontWeight:600}}>📋 Transcript</button>
           <button onClick={()=>setShowExportGame(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:13,fontWeight:600}}>💾 Export</button>
           <button onClick={()=>setShowSummary(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:13,fontWeight:600}}>📊 Summary</button>
           <button onClick={()=>setDark(d=>!d)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",fontSize:17}}>{dark?"☀️":"🌙"}</button>
@@ -566,7 +646,9 @@ export default function PokerTracker() {
             Next: {PHASES[PHASES.indexOf(phase)+1]?.toUpperCase()||"END"} →
           </Button>}
           <Button onClick={()=>startNewHand(players,dealerIdx)} bg={t.surface2} color={t.text}
-            border={`1px solid ${t.border}`} px={16} py={9} fz={14}>🃏 New Hand</Button>
+            border={`1px solid ${t.border}`} px={16} py={9} fz={14}
+            disabled={players.filter(p=>p.stack>0).length<=1}
+            style={{opacity:players.filter(p=>p.stack>0).length<=1?0.5:1,cursor:players.filter(p=>p.stack>0).length<=1?"not-allowed":"pointer"}}>🃏 New Hand</Button>
           {phase==="showdown"&&<Button onClick={()=>setShowHandResult(true)} bg={t.yellow} px={16} py={9} fz={14}>🏆 Show Winner</Button>}
         </div>
         <span style={{color:t.textMuted,fontSize:13}}>{players.filter(p=>!p.folded&&p.active).length} active players</span>
@@ -668,7 +750,7 @@ export default function PokerTracker() {
             setPlayers(up); setSidePots(newSP);
             addLog(`🤝 Split ${chip(sp.amount)} between ${tiedWinners.map(p=>p.name).join(" & ")} (${tiedWinners[0].hand.name})`,"showdown");
           }}
-          onStartNextHand={()=>{setShowHandResult(false);startNewHand(players,dealerIdx);}}
+          onStartNextHand={players.filter(p=>p.stack>0).length<=1 ? null : ()=>{setShowHandResult(false);startNewHand(players,dealerIdx);}}
           onClose={()=>setShowHandResult(false)}
           t={t}
         />
@@ -704,6 +786,17 @@ export default function PokerTracker() {
         <ExportGameModal
           players={players}
           onClose={()=>setShowExportGame(false)}
+          t={t}
+        />
+      )}
+
+      {showTranscript&&screen==="game"&&(
+        <GameTranscriptModal
+          players={players}
+          accumulatedPot={accumulatedPot}
+          mainPot={mainPot}
+          sidePots={sidePots}
+          onClose={()=>setShowTranscript(false)}
           t={t}
         />
       )}
