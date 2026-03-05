@@ -22,6 +22,7 @@ import { PhasePromptModal } from './components/modals/PhasePromptModal';
 import { HandResultModal } from './components/modals/HandResultModal';
 import { SummaryModal } from './components/modals/SummaryModal';
 import { GameWinnerModal } from './components/modals/GameWinnerModal';
+import { ConfirmBackModal } from './components/modals/ConfirmBackModal';
 
 export default function PokerTracker() {
   const [dark, setDark] = useState(false);
@@ -71,6 +72,7 @@ export default function PokerTracker() {
   const [gameWinner, setGameWinner] = useState(null);
   const [potAwarded, setPotAwarded] = useState(false);
   const [hadSidePots, setHadSidePots] = useState(false);
+  const [showConfirmBack, setShowConfirmBack] = useState(false);
 
   const [initialStacks, setInitialStacks] = useState({});
 
@@ -479,7 +481,7 @@ export default function PokerTracker() {
           <button onClick={()=>setShowBlindsModal(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:15}}>⚙</button>
           <button onClick={()=>setShowSummary(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:13,fontWeight:600}}>📊 Summary</button>
           <button onClick={()=>setDark(d=>!d)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",fontSize:17}}>{dark?"☀️":"🌙"}</button>
-          <button onClick={()=>setScreen("setup")} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.textSub,fontSize:14}}>↩</button>
+          <button onClick={()=>setShowConfirmBack(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.textSub,fontSize:14}}>↩</button>
         </div>
       </div>
 
@@ -676,6 +678,14 @@ export default function PokerTracker() {
         <GameWinnerModal 
           winner={gameWinner}
           onClose={()=>{setGameWinner(null);setShowSummary(true);}}
+          t={t}
+        />
+      )}
+
+      {showConfirmBack&&(
+        <ConfirmBackModal
+          onConfirm={()=>{setShowConfirmBack(false);setScreen("setup");}}
+          onCancel={()=>setShowConfirmBack(false)}
           t={t}
         />
       )}
