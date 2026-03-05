@@ -74,6 +74,10 @@ export default function PokerTracker() {
 
   const [initialStacks, setInitialStacks] = useState({});
 
+  // Undo/Redo state
+  const [stateHistory, setStateHistory] = useState([]);
+  const [canUndo, setCanUndo] = useState(false);
+
   useEffect(()=>{ document.body.style.background=t.bg; document.body.style.margin="0"; },[dark]);
 
   useEffect(()=>{
@@ -89,6 +93,56 @@ export default function PokerTracker() {
   },[screen,blindTimer,blindMultiplier]);
 
   const addLog=(msg,ph)=>setActionLog(prev=>[`${(ph||phase).toUpperCase()}: ${msg}`,...prev.slice(0,49)]);
+
+  // Save current state to history before making changes
+  function saveState() {
+    const snapshot = {
+      players: JSON.parse(JSON.stringify(players)),
+      phase,
+      currentBet,
+      activePlayer,
+      communityCards: JSON.parse(JSON.stringify(communityCards)),
+      sidePots: JSON.parse(JSON.stringify(sidePots)),
+      accumulatedPot,
+      actionLog: [...actionLog],
+      dealerIdx,
+      usedCards: [...usedCards],
+      lastRaiseSize,
+      currentSB,
+      currentBB,
+      potAwarded,
+      hadSidePots
+    };
+    setStateHistory(prev => [...prev.slice(-19), snapshot]); // Keep last 20 states
+    setCanUndo(true);
+  }
+
+  // Restore previous state
+  function undoAction() {
+    if (stateHistory.length === 0) return;
+    
+    const previousState = stateHistory[stateHistory.length - 1];
+    setPlayers(previousState.players);
+    setPhase(previousState.phase);
+    setCurrentBet(previousState.currentBet);
+    setActivePlayer(previousState.activePlayer);
+    setCommunityCards(previousState.communityCards);
+    setSidePots(previousState.sidePots);
+    setAccumulatedPot(previousState.accumulatedPot);
+    setActionLog(previousState.actionLog);
+    setDealerIdx(previousState.dealerIdx);
+    setUsedCards(previousState.usedCards);
+    setLastRaiseSize(previousState.lastRaiseSize);
+    setCurrentSB(previousState.currentSB);
+    setCurrentBB(previousState.currentBB);
+    setPotAwarded(previousState.potAwarded);
+    setHadSidePots(previousState.hadSidePots);
+    
+    setStateHistory(prev => prev.slice(0, -1));
+    setCanUndo(stateHistory.length > 1);
+    
+    addLog("↩️ Action undone", previousState.phase);
+  }
 
   function recomputeSidePots(ps) {
     const pots = computeSidePots(ps);
@@ -138,6 +192,8 @@ export default function PokerTracker() {
   }
 
   function doAction(action, amount) {
+    saveState(); // Save state before action
+    
     const p=players[activePlayer];
     let up=[...players], nb=currentBet, newLastRaise=lastRaiseSize;
 
@@ -207,6 +263,8 @@ export default function PokerTracker() {
   }
 
   function confirmAdvancePhase(np){
+    saveState(); // Save state before advancing phase
+    
     setShowCommunityPrompt(false); setPhase(np);
     const streetBets=players.reduce((s,p)=>s+p.bet,0);
     setAccumulatedPot(prev=>prev+streetBets);
@@ -219,6 +277,8 @@ export default function PokerTracker() {
   }
 
   function advancePhase(){
+    saveState(); // Save state before advancing phase
+    
     const ni=PHASES.indexOf(phase)+1; if(ni>=PHASES.length) return;
     const np=PHASES[ni];
     const streetBets=players.reduce((s,p)=>s+p.bet,0);
@@ -254,6 +314,9 @@ export default function PokerTracker() {
   }
 
   function startNewHand(curPlayers,curDealerIdx){
+    setStateHistory([]); // Clear undo history when starting new hand
+    setCanUndo(false);
+    
     const nd=(curDealerIdx+1)%curPlayers.length;
     setDealerIdx(nd);
     const ps=curPlayers.map(p=>({...p,folded:false,allIn:false,holeCards:[],bet:0,handContrib:0,acted:false,active:p.stack>0}));
@@ -268,6 +331,8 @@ export default function PokerTracker() {
   }
 
   function addCommunityCard(rank,suit){
+    saveState(); // Save state before adding card
+    
     const id=rank+suit; setUsedCards(prev=>[...prev,id]);
     setCommunityCards(prev=>{
       const next=[...prev,{rank,suit}];
@@ -278,11 +343,15 @@ export default function PokerTracker() {
   }
 
   function addHoleCard(playerId,rank,suit){
+    saveState(); // Save state before adding card
+    
     setPlayers(prev=>prev.map(p=>p.id===playerId?{...p,holeCards:[...p.holeCards,{rank,suit}]}:p));
     setUsedCards(prev=>[...prev,rank+suit]); setActivePicker(null);
   }
 
   function removeCard(type,idx,playerId){
+    saveState(); // Save state before removing card
+    
     if(type==="community"){
       const c=communityCards[idx];
       setCommunityCards(prev=>prev.filter((_,i)=>i!==idx));
@@ -381,6 +450,26 @@ export default function PokerTracker() {
           <span style={{background:t.accentSoft,color:t.accent,borderRadius:8,padding:"4px 12px",fontSize:13,fontWeight:700}}>
             {phase.toUpperCase()}
           </span>
+          {canUndo && (
+            <button 
+              onClick={undoAction} 
+              title="Undo last action"
+              style={{
+                background: t.yellowSoft,
+                border: `1px solid ${t.yellow}50`,
+                borderRadius: 8,
+                padding: "6px 13px",
+                cursor: "pointer",
+                color: t.yellow,
+                fontSize: 14,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: 6
+              }}>
+              ↩️ Undo
+            </button>
+          )}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           {td&&<div style={{background:t.yellowSoft,border:`1px solid ${t.yellow}50`,borderRadius:8,padding:"6px 13px",color:t.yellow,fontSize:14,fontWeight:600}}>⏱ {td}</div>}
