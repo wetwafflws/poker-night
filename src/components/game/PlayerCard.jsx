@@ -16,6 +16,7 @@ export function PlayerCard({
   onBuyIn, 
   onAddHoleCard, 
   onRemoveHoleCard,
+  onRepayDebt,
   t 
 }) {
   const isBankrupt = player.stack===0 && !player.allIn;
@@ -58,7 +59,21 @@ export function PlayerCard({
         </div>}
         {player.debt>0&&<div>
           <div style={{color:t.textMuted,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:2}}>Owes</div>
-          <div style={{color:t.red,fontSize:17,fontWeight:700}}>{chip(player.debt)}</div>
+          <div style={{display:"flex",alignItems:"flex-end",gap:6}}>
+            <div style={{color:t.red,fontSize:17,fontWeight:700}}>{chip(player.debt)}</div>
+            {phase==="showdown"&&player.stack>0&&(
+              <Button 
+                onClick={onRepayDebt}
+                bg={t.red}
+                px={8}
+                py={4}
+                fz={11}
+                radius={6}
+                style={{fontWeight:600}}>
+                Repay
+              </Button>
+            )}
+          </div>
         </div>}
       </div>
 
@@ -72,7 +87,7 @@ export function PlayerCard({
                       width:18,height:18,color:"#fff",fontSize:11,cursor:"pointer",lineHeight:"18px",textAlign:"center"}}>×</button>
           </div>
         ))}
-        {player.holeCards.length<2&&!player.folded&&(
+        {player.holeCards.length<2&&!player.folded&&phase==="showdown"&&player.active&&(
           <div onClick={onAddHoleCard}
             style={{width:46,height:64,border:`2px dashed ${t.border}`,borderRadius:9,display:"flex",
                     alignItems:"center",justifyContent:"center",cursor:"pointer",color:t.textMuted,

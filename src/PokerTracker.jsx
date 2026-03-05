@@ -23,6 +23,7 @@ import { HandResultModal } from './components/modals/HandResultModal';
 import { SummaryModal } from './components/modals/SummaryModal';
 import { GameWinnerModal } from './components/modals/GameWinnerModal';
 import { ConfirmBackModal } from './components/modals/ConfirmBackModal';
+import { ExportGameModal } from './components/modals/ExportGameModal';
 
 export default function PokerTracker() {
   const [dark, setDark] = useState(false);
@@ -31,6 +32,7 @@ export default function PokerTracker() {
   // Setup config
   const [screen, setScreen] = useState("setup");
   const [playerNames, setPlayerNames] = useState(["Alice","Bob","Charlie","Diana"]);
+  const [playerAmounts, setPlayerAmounts] = useState({});
   const [newName, setNewName] = useState("");
   const [buyIn, setBuyIn] = useState(100);
   const [smallBlind, setSmallBlind] = useState(5);
@@ -73,6 +75,7 @@ export default function PokerTracker() {
   const [potAwarded, setPotAwarded] = useState(false);
   const [hadSidePots, setHadSidePots] = useState(false);
   const [showConfirmBack, setShowConfirmBack] = useState(false);
+  const [showExportGame, setShowExportGame] = useState(false);
 
   const [initialStacks, setInitialStacks] = useState({});
 
@@ -154,12 +157,15 @@ export default function PokerTracker() {
   }
 
   function startGame() {
-    const ps=playerNames.map((name,i)=>({
-      id:i, name, stack:buyIn, folded:false, allIn:false,
-      holeCards:[], bet:0, handContrib:0, acted:false, debt:0, active:true
-    }));
+    const ps=playerNames.map((name,i)=>{ 
+      const amount = playerAmounts[i] !== undefined ? playerAmounts[i] : buyIn;
+      return {
+        id:i, name, stack:amount, folded:false, allIn:false,
+        holeCards:[], bet:0, handContrib:0, acted:false, debt:0, active:true
+      };
+    });
     const initS = {};
-    ps.forEach(p => { initS[p.id] = buyIn; });
+    ps.forEach(p => { initS[p.id] = p.stack; });
     setInitialStacks(initS);
     setPlayers(ps); setCurrentSB(smallBlind); setCurrentBB(bigBlind);
     setSidePots([]); setAccumulatedPot(0); setPotAwarded(false); setHadSidePots(false); setGameWinner(null); setPhase("preflop"); setCommunityCards([]); setUsedCards([]);
@@ -417,6 +423,7 @@ export default function PokerTracker() {
   if(screen==="setup") return (
     <SetupScreen
       playerNames={playerNames}
+      playerAmounts={playerAmounts}
       newName={newName}
       buyIn={buyIn}
       smallBlind={smallBlind}
@@ -424,6 +431,7 @@ export default function PokerTracker() {
       blindTimer={blindTimer}
       blindMultiplier={blindMultiplier}
       onPlayerNamesChange={setPlayerNames}
+      onPlayerAmountsChange={setPlayerAmounts}
       onNewNameChange={setNewName}
       onAddPlayer={()=>{if(newName.trim()){setPlayerNames(p=>[...p,newName.trim()]);setNewName("");}}}
       onBuyInChange={setBuyIn}
@@ -479,6 +487,7 @@ export default function PokerTracker() {
             SB {chip(currentSB)} / BB {chip(currentBB)}
           </div>
           <button onClick={()=>setShowBlindsModal(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:15}}>⚙</button>
+          <button onClick={()=>setShowExportGame(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:13,fontWeight:600}}>💾 Export</button>
           <button onClick={()=>setShowSummary(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.text,fontSize:13,fontWeight:600}}>📊 Summary</button>
           <button onClick={()=>setDark(d=>!d)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",fontSize:17}}>{dark?"☀️":"🌙"}</button>
           <button onClick={()=>setShowConfirmBack(true)} style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 13px",cursor:"pointer",color:t.textSub,fontSize:14}}>↩</button>
@@ -518,6 +527,7 @@ export default function PokerTracker() {
                 onBuyIn={()=>{setShowBuyIn(p.id);setBuyInAmount("");}}
                 onAddHoleCard={()=>setActivePicker({type:"hole",playerId:p.id})}
                 onRemoveHoleCard={(ci)=>removeCard("hole",ci,p.id)}
+                onRepayDebt={()=>doRepayDebt(p.id)}
                 t={t}
               />
               {/* Actions inline below player card */}
@@ -686,6 +696,14 @@ export default function PokerTracker() {
         <ConfirmBackModal
           onConfirm={()=>{setShowConfirmBack(false);setScreen("setup");}}
           onCancel={()=>setShowConfirmBack(false)}
+          t={t}
+        />
+      )}
+
+      {showExportGame&&(
+        <ExportGameModal
+          players={players}
+          onClose={()=>setShowExportGame(false)}
           t={t}
         />
       )}
