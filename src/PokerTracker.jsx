@@ -667,12 +667,12 @@ export default function PokerTracker() {
       )}
 
       {activePicker==="community"&&(
-        <CardPicker usedCards={usedCards} onSelect={addCommunityCard} onClose={()=>setActivePicker(null)}
+        <CardPicker usedCards={usedCards} communityCards={communityCards} onSelect={addCommunityCard} onClose={()=>setActivePicker(null)}
           maxCards={phase==="flop"||pendingPhase==="flop"?3:1}
           currentCount={communityCards.length} t={t}/>
       )}
       {activePicker&&activePicker.type==="hole"&&(
-        <CardPicker usedCards={usedCards} onSelect={(r,s)=>addHoleCard(activePicker.playerId,r,s)}
+        <CardPicker usedCards={usedCards} communityCards={communityCards} onSelect={(r,s)=>addHoleCard(activePicker.playerId,r,s)}
           onClose={()=>setActivePicker(null)} maxCards={1} currentCount={0} t={t}/>
       )}
 
